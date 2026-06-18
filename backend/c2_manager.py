@@ -7,6 +7,9 @@ Manages victim table, metadata extraction, and payload persistence.
 import os
 import time
 import uuid
+import logging
+
+logger = logging.getLogger("ghost.c2")
 
 class C2Manager:
     """
@@ -60,8 +63,8 @@ class C2Manager:
     def build_file_browse_plan(self, session_id, path="/sdcard"):
         """Translate file management to Meterpreter commands rather than ADB shell."""
         if session_id not in self.sessions:
-            # We fallback to returning the command without validation for now
-            pass
+            logger.warning("[C2Manager] build_file_browse_plan called for unknown session '%s'. "
+                           "Proceeding without session metadata validation.", session_id)
             
         return {
             "type": "c2_file_browse",

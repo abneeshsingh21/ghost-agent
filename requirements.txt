@@ -5,19 +5,24 @@
 flask>=3.0.0
 flask-socketio>=5.3.0
 flask-cors>=4.0.0
+eventlet>=0.36.0          # Production async mode for Flask-SocketIO
 
 # ── LLM Backends ──────────────────────────────────────────────
-groq>=0.11.0           # Groq Cloud (primary: llama-3.3-70b-versatile)
-ollama>=0.4.0          # Ollama local fallback (qwen3:4b)
+groq>=0.11.0              # Groq Cloud (primary: llama-3.3-70b-versatile)
+ollama>=0.4.0             # Ollama local fallback (qwen3:4b)
 
 # ── Memory & Environment ───────────────────────────────────────
 python-dotenv>=1.0.0
-chromadb>=0.5.0        # Neural/vector memory layer
+chromadb>=0.5.0           # Neural/vector memory layer
 
 # ── Ultrasonic Tunneling ───────────────────────────────────────
 numpy>=1.26.0
 scipy>=1.13.0
 
 # ── Network & Exploitation Helpers ────────────────────────────
-scapy>=2.5.0           # Zero-Click packet crafting (mDNS/BlastDoor)
+scapy>=2.5.0              # Zero-Click packet crafting (mDNS/BlastDoor)
 requests>=2.31.0
+urllib3>=2.0.0,<3.0.0     # Pin to avoid version mismatch warning with requests
+
+# ── C2 / Metasploit Integration ───────────────────────────────
+pymetasploit3>=1.0.3      # MSF RPC daemon integration for C2Manager

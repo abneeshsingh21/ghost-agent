@@ -12,3 +12,23 @@ memory/session_context.json
 ghost_payloads/
 .venv
 venv/
+
+# Node / Cockpit
+node_modules/
+cockpit/node_modules/
+cockpit/dist/
+
+# Captured data — never commit raw pcaps or probe data
+*.pcap
+probe_requests.json
+"probe_requests.json'"
+
+# Temporary test directories generated during dev/testing
+tmp_*/
+tmp/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
