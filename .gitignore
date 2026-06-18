@@ -1,0 +1,14 @@
+# GHOST v6.0 — Git Ignore
+.env
+__pycache__/
+*.pyc
+loot/
+logs/
+*.log
+memory/session_context.json
+/memory/*.json
+/tmp/
+/payloads/
+ghost_payloads/
+.venv
+venv/

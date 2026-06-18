@@ -1,0 +1,42 @@
+{
+  "version": "3.0",
+  "description": "Per-category autonomy configuration for GHOST operational modes.",
+  "default_mode": "TEACHING",
+  "modes": {
+    "TEACHING": {
+      "description": "All commands proposed before execution. Explicit approval required.",
+      "global_policy": "PROPOSE"
+    },
+    "SUPERVISED": {
+      "description": "Per-category autonomy levels.",
+      "categories": {
+        "reconnaissance": {"passive": "AUTO", "active": "PROPOSE", "aggressive": "HALT"},
+        "vulnerability_analysis": "PROPOSE",
+        "exploitation": "HALT",
+        "post_exploitation": "HALT",
+        "lateral_movement": "HALT",
+        "wireless": {"monitor": "AUTO", "deauth": "PROPOSE", "wpa_crack": "HALT"},
+        "social_engineering": "HALT",
+        "exfiltration": "HALT",
+        "osint": {"passive": "AUTO", "active": "PROPOSE"},
+        "password_cracking": "PROPOSE",
+        "persistence": "HALT",
+        "defense": {"monitoring": "AUTO", "firewall": "PROPOSE", "honeypot": "PROPOSE"}
+      }
+    },
+    "AUTONOMOUS": {
+      "description": "Auto-execute on ethics clearance. Halt on conflicts.",
+      "global_policy": "AUTO",
+      "halt_conditions": ["ethics_rule_match", "novel_situation", "critical_impact", "target_conflict"]
+    },
+    "STEALTH": {
+      "description": "Minimized timing, decoy traffic, MAC rotation.",
+      "timing": "T0",
+      "decoy_traffic": true,
+      "mac_rotation": true,
+      "fragmentation": true,
+      "jitter": true,
+      "business_hours_block": {"enabled": true, "start": "09:00", "end": "17:00"}
+    }
+  }
+}

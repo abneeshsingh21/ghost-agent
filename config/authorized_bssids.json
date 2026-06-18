@@ -1,0 +1,6 @@
+{
+  "version": "3.0",
+  "description": "Authorized wireless BSSIDs. Any BSSID NOT in this list is AUTOMATICALLY PROHIBITED.",
+  "authorized": [],
+  "notes": "Add your own lab/test WiFi BSSIDs here before running wireless attacks."
+}
