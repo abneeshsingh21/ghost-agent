@@ -209,10 +209,12 @@ BEHAVIORAL: You ACT, not chat. Generate REAL executable commands. Chain operatio
             })
 
             # Keep conversation history manageable
+            # IMPORTANT: Preserve ALL system messages (prompt, ethics, forbidden targets)
+            # so the LLM never "forgets" learned rules mid-session.
             if len(self.conversation_history) > 42:
-                self.conversation_history = [
-                    self.conversation_history[0]
-                ] + self.conversation_history[-40:]
+                system_msgs = [m for m in self.conversation_history if m.get("role") == "system"]
+                non_system = [m for m in self.conversation_history if m.get("role") != "system"]
+                self.conversation_history = system_msgs + non_system[-38:]
 
             # Parse commands from response
             commands = self._parse_commands(assistant_message)
@@ -732,8 +734,8 @@ Analyze this output. What did we find? What should we do next?"""
                 # Never execute — report to user
                 cmd_info["executed"] = False
                 cmd_info["halt_reason"] = verdict["reason"]
-            elif verdict["verdict"] == "ALLOW" or (verdict["verdict"] == "PROPOSE" and auto_execute) or mode == "AUTONOMOUS":
-                # Auto-execute (Async)
+            elif verdict["verdict"] == "ALLOW" or (verdict["verdict"] == "PROPOSE" and auto_execute) or mode in ("AUTONOMOUS", "STEALTH"):
+                # Auto-execute (Async) — STEALTH mode is even more autonomous than AUTONOMOUS
                 exec_result = self.execute_command_async(command)
                 cmd_info["executed"] = True
                 cmd_info["exec_result"] = exec_result
@@ -888,8 +890,8 @@ Analyze this output. What did we find? What should we do next?"""
                             "full_command": cmd,
                             "raw": cmd,
                         })
-        except Exception:
-            pass  # Don't crash on malformed LLM output
+        except Exception as e:
+            logging.getLogger("ghost.bridge").warning(f"Command parser error (non-fatal): {e}")
 
         return commands
 
@@ -1109,7 +1111,7 @@ Always think before acting. Be strategic."""
 
                 retry_count += 1
                 stderr = exec_result.get("stderr", "")
-                stdout = exec_result.get("output", "")
+                stdout = exec_result.get("stdout", "")  # BUG FIX: was 'output', execute_command returns 'stdout'
                 exit_code = exec_result.get("exit_code", -1)
                 combined_out = f"{stdout}\n{stderr}".strip()
 
@@ -1308,6 +1310,8 @@ Always think before acting. Be strategic."""
 
         exit_code = exec_result.get("exit_code", -1)
         stdout = exec_result.get("stdout", "") or exec_result.get("output", "") or ""
+        stderr = exec_result.get("stderr", "") or ""
+        combined_output = (stdout + "\n" + stderr).lower()
 
         # Get target's port/OS info from session context
         ports = []
@@ -1348,20 +1352,21 @@ Always think before acting. Be strategic."""
         # ── Dopamine Loop ─────────────────────────────────────
         # Reward: shell acquired, data returned successfully
         # Punish: blocked, banned, connection refused
+        # BUG FIX: Now checks combined stdout+stderr, not just stdout
         if exit_code == 0:
             # Check for high-value indicators in output
             shell_indicators = ["uid=", "whoami", "root@", "meterpreter", "session opened"]
-            if any(ind in stdout.lower() for ind in shell_indicators):
+            if any(ind in combined_output for ind in shell_indicators):
                 # Strong reward — shell acquired!
                 self.neural.reward(op_id, delta=0.25)
             else:
                 # Mild reward — command succeeded
                 self.neural.reward(op_id, delta=0.10)
         else:
-            # Check for punishment indicators
+            # Check for punishment indicators in BOTH stdout and stderr
             punish_indicators = ["blocked", "banned", "filtered", "connection refused",
                                  "access denied", "permission denied", "ids alert"]
-            if any(ind in stdout.lower() for ind in punish_indicators):
+            if any(ind in combined_output for ind in punish_indicators):
                 # Strong punishment — detected/blocked
                 self.neural.punish(op_id, delta=0.30)
             else:
