@@ -1,34 +1,54 @@
 # GHOST v6.0 — Git Ignore
-.env
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets — NEVER commit
+.env
+
+# Runtime data
 loot/
 logs/
 *.log
 memory/session_context.json
 /memory/*.json
+
+# Temp / build artifacts
 /tmp/
+/tmp_*/
 /payloads/
 ghost_payloads/
-.venv
-venv/
+
+# Captured data — never commit raw pcaps or probe data
+*.pcap
+*.pcapng
+probe_requests*
+capture*
+
+# Dead / old frontend (replaced by cockpit/)
+/frontend/
+
+# Dead test artifacts
+/.sixth/
 
 # Node / Cockpit
 node_modules/
 cockpit/node_modules/
 cockpit/dist/
 
-# Captured data — never commit raw pcaps or probe data
-*.pcap
-probe_requests.json
-"probe_requests.json'"
-
-# Temporary test directories generated during dev/testing
-tmp_*/
-tmp/
-
 # IDE / OS
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Random stray text files (keep only docs)
+what*.txt
