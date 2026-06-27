@@ -650,7 +650,7 @@ class ChainEngine:
             "wifi", "wireless", "wpa", "handshake", "aircrack", "deauth",
             "wireless audit", "wifi hack", "capture handshake",
         ],
-        "MOBILE_COMPROMISE": [
+        "MOBILE_CHAIN": [
             "android", "mobile", "adb", "apk", "phone", "frida",
             "mobile attack", "android hack",
         ],
