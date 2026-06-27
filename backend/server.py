@@ -314,6 +314,19 @@ def create_app(base_dir=None, initial_mode="TEACHING", shadow_mode=False, initia
         if strategic:
             import threading
 
+            # Enhancement #4: Auto-select the best chain template
+            chain_match = chains.auto_select_chain(
+                user_input,
+                context={"discovered_hosts": memory.get_session().get("discovered_hosts", [])},
+            )
+            if chain_match and chain_match.get("confidence", 0) >= 0.15:
+                socketio.emit("chain_auto_selected", {
+                    "chain": chain_match["chain_name"],
+                    "display_name": chain_match["chain_display_name"],
+                    "confidence": chain_match["confidence"],
+                    "reason": chain_match["reason"],
+                })
+
             # Emit engine hints for telemetry widgets
             if discovery.is_discovery_request(user_input):
                 socketio.emit("discovery_started", {"message": "Strategic Discovery initiated..."})
@@ -329,6 +342,8 @@ def create_app(base_dir=None, initial_mode="TEACHING", shadow_mode=False, initia
                     "response": r.get("llm_response", ""),
                     "commands": r.get("proposed_commands", []),
                     "verdicts": r.get("ethics_verdicts", []),
+                    "cortex_decision": r.get("cortex_decision"),
+                    "chain_suggestion": chain_match,
                 })
 
             t = threading.Thread(target=_run_strategy, daemon=True)

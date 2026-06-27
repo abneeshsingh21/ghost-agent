@@ -622,6 +622,124 @@ class ChainEngine:
                 # Reset heartbeat so it doesn't trigger continuously
                 self.last_heartbeat = time.time()
 
+    # ═══════════════════════════════════════════════════════════════
+    #  Enhancement #4: Smart Chain Auto-Selection
+    # ═══════════════════════════════════════════════════════════════
+
+    # Keyword → Chain mapping for automatic selection
+    CHAIN_KEYWORDS = {
+        "NETWORK_DISCOVERY": [
+            "scan the network", "discover hosts", "network discovery", "map the network",
+            "find devices", "what's on the network", "enumerate network", "arp scan",
+            "netdiscover", "host discovery", "scan subnet",
+        ],
+        "WEB_COMPROMISE": [
+            "hack the website", "web attack", "web server", "exploit web",
+            "sql injection", "sqli", "website vulnerability", "web pentest",
+            "nikto", "dirb", "gobuster", "web compromise",
+        ],
+        "WEB_LOGIC_PIVOT": [
+            "ssrf", "server side request", "pivot through web", "internal network via web",
+            "proxy attack", "web logic",
+        ],
+        "AD_CHAIN": [
+            "active directory", "domain controller", "kerberoast", "bloodhound",
+            "domain admin", "ad attack", "ldap", "pass the hash", "dcsync",
+        ],
+        "WIRELESS_AUDIT": [
+            "wifi", "wireless", "wpa", "handshake", "aircrack", "deauth",
+            "wireless audit", "wifi hack", "capture handshake",
+        ],
+        "MOBILE_COMPROMISE": [
+            "android", "mobile", "adb", "apk", "phone", "frida",
+            "mobile attack", "android hack",
+        ],
+        "CLOUD_PIVOT": [
+            "cloud", "aws", "azure", "gcp", "metadata", "imds",
+            "cloud attack", "iam", "s3 bucket",
+        ],
+        "IOT_SWARM": [
+            "iot", "smart home", "mqtt", "zigbee", "ble",
+            "internet of things", "embedded", "firmware",
+        ],
+    }
+
+    def auto_select_chain(self, user_input, context=None):
+        """
+        Enhancement #4: Automatically select the best chain template
+        based on user input keywords and session context.
+
+        Args:
+            user_input: operator's natural language request
+            context: optional dict with session intel (discovered_hosts, etc.)
+
+        Returns:
+            dict with {chain_name, confidence, reason} or None if no match
+        """
+        user_lower = user_input.lower()
+        scores = {}
+
+        # Score each chain by keyword match density
+        for chain_name, keywords in self.CHAIN_KEYWORDS.items():
+            if chain_name not in self.CHAIN_TEMPLATES:
+                continue
+            score = 0
+            matched_keywords = []
+            for kw in keywords:
+                if kw in user_lower:
+                    # Longer keyword matches are worth more
+                    score += len(kw.split())
+                    matched_keywords.append(kw)
+            if score > 0:
+                scores[chain_name] = {
+                    "score": score,
+                    "matched": matched_keywords,
+                }
+
+        # Context-aware boosting
+        if context and scores:
+            hosts = context.get("discovered_hosts", [])
+
+            # If we have discovered hosts with web ports, boost web chains
+            web_ports = {80, 443, 8080, 8443}
+            has_web = any(
+                web_ports & set(h.get("ports", []))
+                for h in hosts
+            )
+            if has_web:
+                for chain in ("WEB_COMPROMISE", "WEB_LOGIC_PIVOT"):
+                    if chain in scores:
+                        scores[chain]["score"] += 2
+
+            # If we have hosts with SMB/AD ports, boost AD chain
+            ad_ports = {88, 389, 445, 636, 3268}
+            has_ad = any(
+                ad_ports & set(h.get("ports", []))
+                for h in hosts
+            )
+            if has_ad and "AD_CHAIN" in scores:
+                scores["AD_CHAIN"]["score"] += 3
+
+            # If no hosts discovered yet, boost NETWORK_DISCOVERY
+            if not hosts and "NETWORK_DISCOVERY" in scores:
+                scores["NETWORK_DISCOVERY"]["score"] += 2
+
+        if not scores:
+            return None
+
+        # Pick the highest scoring chain
+        best_chain = max(scores, key=lambda k: scores[k]["score"])
+        best_info = scores[best_chain]
+        max_possible = max(len(kws) for kws in self.CHAIN_KEYWORDS.values())
+        confidence = min(best_info["score"] / max_possible, 1.0)
+
+        return {
+            "chain_name": best_chain,
+            "chain_display_name": self.CHAIN_TEMPLATES[best_chain]["name"],
+            "confidence": round(confidence, 2),
+            "reason": f"Matched keywords: {', '.join(best_info['matched'])}",
+            "all_scores": {k: v["score"] for k, v in scores.items()},
+        }
 
     def list_chains(self):
         """List all available chain templates."""

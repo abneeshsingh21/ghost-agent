@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timezone
 from backend.neural import TacticalMemory
 from backend.cortex import FrontalCortex
+from backend.parsers import ToolOutputParser
 
 try:
     import ollama
@@ -168,11 +169,63 @@ BEHAVIORAL: You ACT, not chat. Generate REAL executable commands. Chain operatio
         print(f"  [!] Rotated to Groq model: {self.groq_model}")
         return self.groq_model
 
+    def _build_sitrep(self):
+        """
+        Enhancement #8: Context Window Intelligence.
+        Build a compact Situation Report from neural memory + session context
+        so the LLM has full situational awareness on every call.
+        """
+        lines = []
+        session = self.memory.get_session()
+        hosts = session.get("discovered_hosts", [])
+
+        if hosts:
+            lines.append("DISCOVERED HOSTS (from this session):")
+            for h in hosts[:15]:  # Cap at 15 to save tokens
+                ports_str = ",".join(str(p) for p in h.get("ports", [])[:10])
+                os_str = h.get("os", "")
+                line = f"  {h['ip']}"
+                if ports_str:
+                    line += f" ports=[{ports_str}]"
+                if os_str:
+                    line += f" os={os_str}"
+                if h.get("services"):
+                    svcs = [f"{s.get('service','?')}:{s.get('port','')}" for s in h["services"][:5]]
+                    line += f" services=[{','.join(svcs)}]"
+                lines.append(line)
+
+        creds = session.get("credentials_found", [])
+        if creds:
+            lines.append(f"CREDENTIALS FOUND: {len(creds)} credential(s) available")
+            for c in creds[:5]:
+                lines.append(f"  {c.get('service','?')}@{c.get('host','?')} user={c.get('username','?')}")
+
+        shells = session.get("shells", [])
+        if shells:
+            lines.append(f"ACTIVE SHELLS: {len(shells)}")
+
+        # Cross-session memory from neural brain
+        if self.neural and self.neural.available:
+            try:
+                topo = self.neural.recall_topology()
+                if topo and not hosts:
+                    lines.append("PREVIOUS SESSION TOPOLOGY (from neural memory):")
+                    for ip, info in list(topo.items())[:10]:
+                        ports_str = ",".join(str(p) for p in info.get("ports", [])[:10])
+                        lines.append(f"  {ip} ports=[{ports_str}] os={info.get('os', '?')}")
+            except Exception:
+                pass
+
+        if not lines:
+            return None
+        return "\n".join(lines)
+
     def ask_llm(self, user_message):
         """
         Send a message to the LLM and get the response.
         Uses Groq cloud API (fast) if available, falls back to Ollama (slow).
         Auto-rotates Groq models on rate limit (429) errors.
+        Enhancement #8: Injects situational awareness before each call.
         """
         if not self.use_groq and not OLLAMA_AVAILABLE:
             return {
@@ -181,10 +234,17 @@ BEHAVIORAL: You ACT, not chat. Generate REAL executable commands. Chain operatio
                 "analysis": None,
             }
 
+        # Enhancement #8: Inject situation report into context before user message
+        sitrep = self._build_sitrep()
+        if sitrep:
+            enriched_message = f"[SITUATION REPORT — Current Intelligence]\n{sitrep}\n\n[OPERATOR]\n{user_message}"
+        else:
+            enriched_message = user_message
+
         # Add user message to conversation
         self.conversation_history.append({
             "role": "user",
-            "content": user_message
+            "content": enriched_message
         })
 
         # Emit thinking indicator
@@ -1047,6 +1107,41 @@ Always think before acting. Be strategic."""
             "strategy_plan": plan_text,
         }
 
+        # ── Phase 1.5: CORTEX DELIBERATION (Enhancement #1) ──
+        # Run the Red/Blue/Judge swarm to optimize the attack vector.
+        # Only activates when we have a clear target IP.
+        target_ip = self._extract_ip(user_input)
+        cortex_decision = None
+        if target_ip and self.cortex and llm_result["commands"]:
+            try:
+                # Build target profile from session context + neural memory
+                target_profile = self._build_target_profile(target_ip)
+                if target_profile.get("ports"):  # Only deliberate if we have port intel
+                    if sio:
+                        sio.emit("thinking_block", {
+                            "phase": "CORTEX",
+                            "title": "🧠 Frontal Cortex — Multi-Agent Deliberation",
+                            "content": f"Target: {target_ip} | Ports: {target_profile.get('ports', [])}",
+                        })
+                    cortex_decision = self.cortex.deliberate(target_profile, sio)
+
+                    # If Cortex produced a winning command, prepend it to the command list
+                    if cortex_decision and cortex_decision.get("final_command"):
+                        cortex_cmd = cortex_decision["final_command"]
+                        # Insert the Cortex-optimized command at the front
+                        llm_result["commands"].insert(0, {
+                            "category": "CORTEX",
+                            "tool": cortex_cmd.split()[0] if cortex_cmd else "unknown",
+                            "arguments": cortex_cmd,
+                            "full_command": cortex_cmd,
+                            "raw": cortex_cmd,
+                            "cortex_optimized": True,
+                            "cortex_score": cortex_decision.get("composite_score", 0),
+                        })
+                        result["cortex_decision"] = cortex_decision
+            except Exception as e:
+                logging.getLogger("ghost.bridge").warning(f"Cortex deliberation error: {e}")
+
         # ── Phase 2: EXECUTE ──────────────────────────────────
         for cmd_info in llm_result["commands"]:
             if self._strategy_abort:
@@ -1057,8 +1152,8 @@ Always think before acting. Be strategic."""
             if not command:
                 continue
 
-            target_ip = self._extract_ip(command)
-            verdict = self.ethics.check_command(command, target_ip)
+            cmd_target_ip = self._extract_ip(command) or target_ip
+            verdict = self.ethics.check_command(command, cmd_target_ip)
             cmd_info["ethics_verdict"] = verdict
             result["ethics_verdicts"].append(verdict)
 
@@ -1099,8 +1194,11 @@ Always think before acting. Be strategic."""
             cmd_info["exec_result"] = exec_result
             result["execution_results"].append(exec_result)
 
+            # ── Enhancement #2: Auto-parse output intelligence ─────
+            self._auto_parse_and_update(command, exec_result, cmd_target_ip)
+
             # ── Neural: Auto-record successful operations ─────
-            self._neural_record(command, exec_result, target_ip)
+            self._neural_record(command, exec_result, cmd_target_ip)
 
             # ── Phase 3: SELF-CORRECTION ──────────────────────
             retry_count = 0
@@ -1219,6 +1317,143 @@ Always think before acting. Be strategic."""
             "analysis": None,
             "strategy_status": status,
         }
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Intelligence Helpers — Target Profiling & Output Parsing
+    # ═══════════════════════════════════════════════════════════════
+
+    def _build_target_profile(self, target_ip):
+        """
+        Enhancement #1: Build a target profile for the Cortex swarm.
+        Aggregates intelligence from session context + neural memory + memory manager.
+        """
+        profile = {
+            "ip": target_ip,
+            "os": "",
+            "ports": [],
+            "services": [],
+            "device_class": "unknown",
+            "risk_flags": [],
+        }
+
+        # Check session discovered_hosts
+        for host in self.memory.get_session().get("discovered_hosts", []):
+            if host.get("ip") == target_ip:
+                profile["ports"] = host.get("ports", [])
+                profile["services"] = host.get("services", [])
+                profile["os"] = host.get("os", "")
+                if host.get("vendor"):
+                    profile["device_class"] = host["vendor"]
+                break
+
+        # Check memory manager target profiles
+        stored_profile = self.memory.get_target_profile(target_ip)
+        if stored_profile:
+            if not profile["ports"]:
+                profile["ports"] = stored_profile.get("ports", [])
+            if not profile["os"]:
+                profile["os"] = stored_profile.get("os", "")
+            profile["device_class"] = stored_profile.get("device_class", profile["device_class"])
+            profile["risk_flags"] = stored_profile.get("risk_flags", [])
+
+        # Check neural memory topology
+        if self.neural and self.neural.available and not profile["ports"]:
+            try:
+                topo = self.neural.recall_topology()
+                if target_ip in topo:
+                    host_info = topo[target_ip]
+                    profile["ports"] = [int(p) for p in host_info.get("ports", []) if str(p).isdigit()]
+                    profile["os"] = host_info.get("os", "")
+            except Exception:
+                pass
+
+        return profile
+
+    def _auto_parse_and_update(self, command, exec_result, target_ip=None):
+        """
+        Enhancement #2: Automatically parse tool output and update session intelligence.
+        Called after every command execution to populate the target map.
+        """
+        stdout = exec_result.get("stdout", "") or ""
+        stderr = exec_result.get("stderr", "") or ""
+
+        parsed = ToolOutputParser.parse(command, stdout, stderr)
+        if not parsed:
+            return
+
+        session = self.memory.get_session()
+
+        # Update discovered_hosts in session context
+        if parsed.get("hosts"):
+            existing_ips = {h.get("ip") for h in session.get("discovered_hosts", [])}
+
+            for host in parsed["hosts"]:
+                ip = host.get("ip", "")
+                if not ip:
+                    continue
+
+                if ip in existing_ips:
+                    # Merge: update existing host with new intel
+                    for i, existing in enumerate(session["discovered_hosts"]):
+                        if existing.get("ip") == ip:
+                            # Merge ports (deduplicate)
+                            existing_ports = set(existing.get("ports", []))
+                            new_ports = set(host.get("ports", []))
+                            existing["ports"] = sorted(existing_ports | new_ports)
+                            # Merge services
+                            existing_svc_ports = {s.get("port") for s in existing.get("services", [])}
+                            for svc in host.get("services", []):
+                                if svc.get("port") not in existing_svc_ports:
+                                    existing.setdefault("services", []).append(svc)
+                            # Update OS if we didn't have one
+                            if host.get("os") and not existing.get("os"):
+                                existing["os"] = host["os"]
+                            if host.get("mac"):
+                                existing["mac"] = host["mac"]
+                            if host.get("vendor"):
+                                existing["vendor"] = host["vendor"]
+                            break
+                else:
+                    # New host — add to session
+                    session.setdefault("discovered_hosts", []).append(host)
+                    existing_ips.add(ip)
+
+            # Persist session updates
+            self.memory.update_session(session)
+
+        # Update credentials
+        if parsed.get("credentials"):
+            for cred in parsed["credentials"]:
+                session.setdefault("credentials_found", []).append(cred)
+            self.memory.update_session(session)
+
+        # Store topology in neural memory for cross-session recall
+        if parsed.get("hosts") and self.neural and self.neural.available:
+            try:
+                hosts_data = {}
+                for h in parsed["hosts"]:
+                    if h.get("ip"):
+                        hosts_data[h["ip"]] = {
+                            "hostname": h.get("hostname", ""),
+                            "os": h.get("os", ""),
+                            "ports": h.get("ports", []),
+                        }
+                if hosts_data:
+                    # Derive subnet from first host
+                    first_ip = list(hosts_data.keys())[0]
+                    subnet = ".".join(first_ip.split(".")[:3]) + ".0/24"
+                    self.neural.store_topology(subnet, hosts_data)
+            except Exception as e:
+                logging.getLogger("ghost.bridge").warning(f"Neural topology store error: {e}")
+
+        # Emit parsed intelligence to frontend
+        if self.socketio and parsed.get("hosts"):
+            self.socketio.emit("intelligence_update", {
+                "parser": parsed.get("parser", ""),
+                "hosts_count": len(parsed.get("hosts", [])),
+                "summary": parsed.get("raw_summary", ""),
+                "hosts": parsed.get("hosts", []),
+            })
 
     # ═══════════════════════════════════════════════════════════════
     #  Neural Brain Helpers — Reflex & Recording

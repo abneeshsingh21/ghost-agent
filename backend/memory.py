@@ -325,6 +325,15 @@ class MemoryManager:
         self._save_json(self.paths["session_context"], self.session_context)
         return True
 
+    def update_session(self, session_data):
+        """
+        Bulk update the session context (Enhancement #2).
+        Merges the provided dict into the current session and persists.
+        """
+        self.session_context = session_data
+        self._save_json(self.paths["session_context"], self.session_context)
+        return True
+
     def add_shell(self, shell_type, target, pid=None):
         """Register an active shell session."""
         shell = {
